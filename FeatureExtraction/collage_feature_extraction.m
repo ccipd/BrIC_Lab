@@ -26,6 +26,6 @@ for i =1:length(patient_names)
     
 [featints, featnames, featstats, statnames] = extract3DFeatureInfo(vol,mask,class_options, ws_options);
  patient_stats= reshape(featstats,[1,numel(featstats)]); 
- Texture_features(:,i) = patient_stats';
+ Collage_features(:,i) = patient_stats';
 end
-Texture_feature_names = statnames(:);
+Collage_feature_names = statnames(:);
