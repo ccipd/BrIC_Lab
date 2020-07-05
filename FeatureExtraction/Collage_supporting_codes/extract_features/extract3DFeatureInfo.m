@@ -33,7 +33,7 @@ funcname = 'extract3DFeatureInfo.m';
 funcpath = which(funcname);
 codepath = funcpath(1:end-length(funcname));
 
-addpath([codepath '../images']);
+% addpath([codepath '../images']);
 addpath([codepath '../subfunctions']);
 
 %% check inputs
