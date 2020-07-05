@@ -3,88 +3,109 @@
 #include <cmath>
 #include <cstdlib>
 
+#ifdef _WIN32
+	#include <windows.h>
+#else
+	#include <unistd.h>
+#endif
+
 #ifndef min
 #define min(X, Y)  (X < Y ? X : Y)
 #endif
 #ifndef max
 #define max(X, Y)  (X < Y ? Y : X)
 #endif
-#ifndef isnan 
-#define isnan(x) ((x)!=(x)) 
-#endif
-/* haralick2mex -- Haralick for 2D images. Syntax:
- * haralickims = haralick2mex(double image, double graylevels, double window_size, double dist, double background [optional]) */
 
- /* To Compile:
- *-WINDOWS (64-bit, Visual Studio)
- * mex haralick2mex.cpp
+/* haralick3mex -- Haralick for 3D volumes. Syntax:
+ * haralickims = haralick3mex(double volume, double graylevels, double window_size, double dist, double background [optional]) 
+ *
+ *To compile, it is necessary to link against libut:
+ *-WINDOWS (64-bit, visual studio):
+ *	mex('-v','-largeArrayDims','haralick3mex.cpp',[matlabroot '\extern\lib\win64\microsoft\libut.lib'])
+ *-WINDOWS (32-bit, visual studio):
+ *  mex('-v','-largeArrayDims','haralick3mex.cpp',[matlabroot '\extern\lib\win32\microsoft\libut.lib'])
+ *-WINDOWS (32-bit, lcc):
+ *  mex('-v','-largeArrayDims','haralick3mex.cpp',[matlabroot '\extern\lib\win32\lcc\libut.lib'])
+ *-LINUX: mex -v -largeArrayDims haralick3mex.cpp -lut
  */
- 
-//typedef unsigned int uint;
-//typedef unsigned short uint16;
 
 inline bool greater (int i,int j) { return (j<i); }
 
-inline double logb(double x, double b)
-{
-  return log(x)/log(b);
-}
+inline double logb(double x, double b) { return log(x)/log(b); }
 
-// bool utSetInterruptEnabled(bool);
-// bool utIsInterruptPending(void);
-void graycomtx(const double *image, double *comtx, int ws, int dist, 
-        int graylevels, const int background, int rows, int cols, int row, int col) {
+// prototype the break handling functions in libut (C library)
+#ifdef __cplusplus
+    extern "C" bool utIsInterruptPending();
+    extern "C" void utSetInterruptPending(bool);
+#else
+    extern bool utIsInterruptPending();
+    extern void utSetInterruptPending(bool);
+#endif
+
+void graycomtx(double ***imagemat, double *comtx, int ws, int dist, 
+        int graylevels, const int background, int rows, int cols, int slices, 
+        int row, int col, int slice) {
     
-    int i, j, k, l, centerind, pixind, center_value, hws;
-    int d_start_row, d_start_col, d_end_row, d_end_col;
-    int block_start_row, block_start_col, block_end_row, block_end_col;
+    int h, i, j, k, l, m, center_value, hws, slicepixels;
+    //int centerind, pixind;
+    int d_start_row, d_start_col, d_start_slice, d_end_row, d_end_col, d_end_slice;
+    int block_start_row, block_start_col, block_start_slice;
+    int block_end_row, block_end_col, block_end_slice;
     
     for (i = 0; i < graylevels*graylevels; i++)
         comtx[i] = 0.0;
+
+    slicepixels=rows*cols;
     
     hws=(int) floor((float) ws/2);
     block_start_row = max(0, row-hws);
     block_start_col = max(0, col-hws);
+    block_start_slice = max(0, slice-hws);
     block_end_row = min(rows-1, row+hws);
     block_end_col = min(cols-1, col+hws);
+    block_end_slice = min(slices-1, slice+hws);
     
-    for (j = block_start_col; j < block_end_col; j++)  {
-        for (i = block_start_row; i < block_end_row; i++) {
-            centerind=i+j*rows;
-            center_value = (int) image[centerind];
-			if (isnan(image[centerind]) || (image[centerind] == background))
+    for (h = block_start_slice; h <= block_end_slice; h++)
+    for (j = block_start_col; j <= block_end_col; j++)
+        for (i = block_start_row; i <= block_end_row; i++) {
+            //centerind=i+j*rows+h*slicepixels;
+            center_value = (int) imagemat[i][j][h];
+            if (center_value == background)
                 continue;
-			
-			center_value = (int) image[centerind];
 
-	        d_start_row = max((int) 0, i-dist);
+            d_start_row = max((int) 0, i-dist);
             d_start_col = max((int) 0, j-dist);
+            d_start_slice = max((int) 0, h-dist);
             d_end_row = min((int) rows-1, i+dist);
             d_end_col = min((int) cols-1, j+dist);
-            for (l = d_start_col; l <= d_end_col; l++) {
+            d_end_slice = min((int) slices-1, h+dist);
+            for (m = d_start_slice; m <= d_end_slice; m++)
+            for (l = d_start_col; l <= d_end_col; l++)
                 for (k = d_start_row; k <= d_end_row; k++) {
-                    pixind=k+l*rows;
-                    if (!isnan(image[pixind]) && (image[pixind]!=background)) {
-						//if ((dist==0) || (pixind!=centerind)) //either dist=0 or exclude dist=0
-                        comtx[center_value + (int) (image[pixind]+0.5)*graylevels] += 1;
-					}
+                    //pixind=k+l*rows+m*slicepixels;
+                    //if (imagemat[k][l][m]!=background && pixind!=centerind)
+                    if (imagemat[k][l][m]!=background)
+                        comtx[center_value + (int) (imagemat[k][l][m]+0.5)*graylevels] += 1;
                 }
-			}
+            
+            comtx[center_value + center_value*graylevels] -= 1;
+            //if (comtx[center_value + center_value*graylevels]<0) mexErrMsgTxt("Crap.");
         }
-	}
-
-	//testing purposes
-   /* for (i = 0; i < graylevels*graylevels; i++) {
-       if ((int) comtx[i] != 0)
-           mexPrintf("\nWith window centered at: [%i][%i]: comtx[%i]=%i",row,col,i,(int) comtx[i]);
-    }
-   mexPrintf(" (all else zeros)\n");   
-   */
+    /*
+    for(k = block_start_slice; k < block_end_slice; k++)
+        for(j = block_start_col; j < block_end_col; j++)
+            for(i = block_start_row; i < block_end_row; i++) {
+                center_value = (int) imagemat[i][j][k];
+                if (center_value!=background)
+                    comtx[center_value + center_value*graylevels] -= 1;
+            }
+     */
 }
-		
-void haralick2(double *image, double *haralicks, int ws, int dist, int graylevels, int background, int rows, int cols, int nharalicks) {
+
+void haralick3(double ***imagemat, double *haralicks, int ws, int dist, int graylevels, int background, int rows, int cols, int slices, int nharalicks) {
     
-    int i, j, k, ii, jj, nbins, nzeros, nnonzeros, somepct, tenpct, pynzs, pxnzs;
+    int h, i, j, k, ii, jj, nbins, nzeros, nnonzeros, somepct, tenpct; //, pynzs, pxnzs;
+    int volumepixelind, volumepixels;
     int *hi, *hj, *himhj, *hiphj;
     double *comtx, *p, *pnz, *nzcomtx, *px, *py, *pxplusy, *pxminusy;
     double entropyval, energyval, inertiaval, idmval, 
@@ -92,9 +113,11 @@ void haralick2(double *image, double *haralicks, int ws, int dist, int graylevel
             sigma_x, sigma_y, mu_x, mu_y, h_x, h_y, h_max,
             saval, svval, seval, daval, dvval, deval, cosum;
     
+    volumepixels=rows*cols*slices;
+    
     nbins=graylevels*graylevels;
-    somepct = (int) floor(.025*rows*cols-1);
-    tenpct = (int) floor(.1*rows*cols-1);
+    somepct = (int) floor(.025*rows*cols*slices-1);
+    tenpct = (int) floor(.1*rows*cols*slices-1);
     
     comtx = (double *) mxMalloc(nbins*sizeof(double));
     nzcomtx = (double *) mxMalloc(nbins*sizeof(double));
@@ -111,16 +134,18 @@ void haralick2(double *image, double *haralicks, int ws, int dist, int graylevel
     himhj = (int *) mxMalloc(nbins*sizeof(int));
     hiphj = (int *) mxMalloc(nbins*sizeof(int));
     
-    for(j = 0; j < cols; j++)
-        for(i = 0; i < rows; i++)
-            if(image[i+j*rows] >= graylevels && image[i+j*rows]!=background)
-                mexErrMsgTxt("Graylevels of image fall outside acceptable range.");
+    for(k = 0; k < slices; k++)
+        for(j = 0; j < cols; j++)
+            for(i = 0; i < rows; i++)
+                if(imagemat[i][j][k] >= graylevels && imagemat[i][j][k]!=background)
+                    mexErrMsgTxt("Graylevels of image fall outside acceptable range.");
     
-    for (j=0; j<cols; j++) {
-        for (i=0; i<rows; i++) {
-            if (image[i+j*rows]!=background) {
+    for (h=0; h<slices; ++h) {
+    for (j=0; j<cols; ++j) {
+        for (i=0; i<rows; ++i) {
+            if (imagemat[i][j][h]!=background) {
             /* Get co-occurrence matrix */
-            graycomtx(image, comtx, ws, dist, graylevels, background, rows, cols, i, j);
+            graycomtx(imagemat, comtx, ws, dist, graylevels, background, rows, cols, slices, i, j, h);
             
             /* Initialize feature values */
             entropyval=0; energyval=0; inertiaval=0; idmval=0;
@@ -201,7 +226,7 @@ void haralick2(double *image, double *haralicks, int ws, int dist, int graylevel
                 }
             h_max=max(h_x,h_y);
             info1val=(h_max!=0 ? (entropyval-H1)/h_max : 0);
-            info2val=sqrt(abs( (1-exp(-2*(H2-entropyval)))  ) );
+            info2val=sqrt(abs(1-exp(-2*(H2-entropyval))));
             
             /* Sum average, variance and entropy */
             for (k=0; k<(2*graylevels); k++)
@@ -251,57 +276,67 @@ void haralick2(double *image, double *haralicks, int ws, int dist, int graylevel
              */
             
             /* Put feature values in output volume */
-            haralicks[i+j*rows+0*rows*cols]=entropyval;
-            haralicks[i+j*rows+1*rows*cols]=energyval;
-            haralicks[i+j*rows+2*rows*cols]=inertiaval;
-            haralicks[i+j*rows+3*rows*cols]=idmval;
-            haralicks[i+j*rows+4*rows*cols]=correlationval;
-            haralicks[i+j*rows+5*rows*cols]=info1val;
-            haralicks[i+j*rows+6*rows*cols]=info2val;
-            haralicks[i+j*rows+7*rows*cols]=saval;
-            haralicks[i+j*rows+8*rows*cols]=svval;
-            haralicks[i+j*rows+9*rows*cols]=seval;
-            haralicks[i+j*rows+10*rows*cols]=daval;
-            haralicks[i+j*rows+11*rows*cols]=dvval;
-            haralicks[i+j*rows+12*rows*cols]=deval;
+            volumepixelind=i + j*rows + h*rows*cols;
+            haralicks[volumepixelind+0*volumepixels]=entropyval;
+            haralicks[volumepixelind+1*volumepixels]=energyval;
+            haralicks[volumepixelind+2*volumepixels]=inertiaval;
+            haralicks[volumepixelind+3*volumepixels]=idmval;
+            haralicks[volumepixelind+4*volumepixels]=correlationval;
+            haralicks[volumepixelind+5*volumepixels]=info1val;
+            haralicks[volumepixelind+6*volumepixels]=info2val;
+            haralicks[volumepixelind+7*volumepixels]=saval;
+            haralicks[volumepixelind+8*volumepixels]=svval;
+            haralicks[volumepixelind+9*volumepixels]=seval;
+            haralicks[volumepixelind+10*volumepixels]=daval;
+            haralicks[volumepixelind+11*volumepixels]=dvval;
+            haralicks[volumepixelind+12*volumepixels]=deval;
             
             } else {
-                for (k=0; k<nharalicks; k++) haralicks[i+j*rows+k*rows*cols]=0;
+                volumepixelind=i + j*rows + h*rows*cols;
+                for (k=0; k<nharalicks; k++) haralicks[volumepixelind+k*volumepixels]=0;
             }
-            /**
-            if (((i+j*rows+1) % somepct)==0) {
+            
+            if ((volumepixelind % 2000) == 0 && utIsInterruptPending()) {
+                utSetInterruptPending(false);
+                mexErrMsgTxt("<user interrupted>\n");
+                return;
+            }
+            if (((volumepixelind+1) % somepct)==0) {
                 mexPrintf("."); mexEvalString("drawnow");
-            } else if (((i+j*rows) % tenpct)==0) {
-                mexPrintf("%d%%",(int) ceil((float) 100*(i+j*rows)/(rows*cols-1))); mexEvalString("drawnow");
-//                 if (utIsInterruptPending()) return;
+            } else if (((volumepixelind) % tenpct)==0) {
+                mexPrintf("%d%%",(int) ceil((float) 100*(volumepixelind)/(volumepixels-1))); mexEvalString("drawnow");
             }
-			*/
-			
-			
+            
         }
     }
-    //mexPrintf("\n");
+    }
+    mexPrintf("\n");
 }
 
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     
-    double *haralicks, *image;
-    int dist, rows, cols;
+    double *haralicks, *image, ***imagemat;
+    int dist, rows, cols, slices, i, j, k, ndims, slicepixels;
+    const mwSize *imdims;
     int graylevels, background, ws;
-    mwSize dims[3];
+    mwSize hardims[4];
     int nharalicks=13;
     //unsigned short int *X;
-    mexPrintf("\haralick2mex called.\n");
-	
+    
     if(nrhs > 5 || nrhs < 4)
-        mexErrMsgTxt("haralick2mex(image,graylevels,ws,dist,[background])");
+        mexErrMsgTxt("haralick3mex(volume,graylevels,ws,dist,[background])");
     
     if(!mxIsDouble(prhs[0]))
-        mexErrMsgTxt("Input image must be DOUBLE.");
+        mexErrMsgTxt("Input volume must be DOUBLE.");
     
     image = mxGetPr(prhs[0]);
-    rows = (int) mxGetM(prhs[0]);
-    cols = (int) mxGetN(prhs[0]);
+    imdims=mxGetDimensions(prhs[0]);
+    ndims=(int) mxGetNumberOfDimensions(prhs[0]);
+    if (ndims!=3) mexErrMsgTxt("Input image must have 3 dimensions.");
+    rows=(int) imdims[0]; cols=(int) imdims[1]; slices=(int) imdims[2];
+    slicepixels=rows*cols;
+    //rows = (int) mxGetM(prhs[0]);
+    //cols = (int) mxGetN(prhs[0]);
     graylevels=(int) mxGetScalar(prhs[1]);
     ws = (int) mxGetScalar(prhs[2]);
     dist = (int) mxGetScalar(prhs[3]);
@@ -313,9 +348,22 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     if(graylevels < 0 || graylevels > 65535)
         mexErrMsgTxt("GRAYLEVELS must be between 0 and 2^16-1.");
     
-    dims[0] = rows; dims[1] = cols; dims[2] = nharalicks;
-    plhs[0] = mxCreateNumericArray(3, dims, mxDOUBLE_CLASS, mxREAL);
+    imagemat = (double ***) mxMalloc(rows*sizeof(double **));
+    for (i=0; i<rows; i++) {
+        imagemat[i] = (double **) mxMalloc(cols*sizeof(double *));
+        for (j=0; j<cols; j++)
+            imagemat[i][j] = (double *) mxMalloc(slices*sizeof(double));
+    }
+    
+    for (k=0; k<slices; k++)
+        for (j=0; j<cols; j++)
+            for (i=0; i<rows; i++)
+                imagemat[i][j][k]=image[i+j*rows+k*slicepixels];
+    
+    hardims[0] = rows; hardims[1] = cols; hardims[2] = slices;
+    hardims[3] = nharalicks;
+    plhs[0] = mxCreateNumericArray(4, hardims, mxDOUBLE_CLASS, mxREAL);
     haralicks = mxGetPr(plhs[0]);
     
-    haralick2(image,haralicks,ws,dist,graylevels,background,rows,cols,nharalicks);
+    haralick3(imagemat,haralicks,ws,dist,graylevels,background,rows,cols,slices,nharalicks);
 }
